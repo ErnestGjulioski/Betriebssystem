@@ -1,52 +1,47 @@
 #!/bin/bash
 
-# Funktion zur Anzeige der Hilfs-/Usage-Informationen
+# Anleitung:
 usage() {
-    echo "Usage: $0 [-c | --command] [-u | --user] [-h | --help]"
-    echo "  -c, --command  Display the command of the process using the port"
-    echo "  -u, --user     Display the user ID of the process using the port"
-    echo "  -h, --help     Display this help message"
+    echo "Verwendung: $0 [-c | --command] [-u | --user] [-h | --help]"
+    echo "  -c, --command  Zeigt den den Command selbst aus"
+    echo "  -u, --user     Zeigt die Benutzer-ID "
+    echo "  -h, --help     Zeigt diese Hilfemeldung an"
     exit 0
 }
 
-# Prüfen, ob 'ss' vorhanden ist
-if ! command -v ss &> /dev/null; then
-    echo "Error: 'ss' command not found. Please install it to use this script."
-    exit 1
-fi
+# Prüfen, ob die benötigten Befehle existieren
+for cmd in ss lsof ps awk grep cut sort; do
+    if ! command -v $cmd &> /dev/null; then
+        echo "Fehler: Befehl '$cmd' nicht gefunden."
+        exit 1
+    fi
+done
 
-# Standardoption setzen
+# Standardoption
 option="command"
 
-# Verarbeitung der Kommandozeilenargumente
+
 case "$1" in
-    -c|--command)
-        option="command"
-        ;;
-    -u|--user)
-        option="user"
-        ;;
-    -h|--help)
-        usage
-        ;;
-    "" ) # Kein Argument angegeben
-        ;;
-    *)
-        echo "Error: Invalid argument '$1'"
-        usage
-        ;;
+    -c|--command) option="command" ;;
+
+    -u|--user) option="user" ;;
+
+    -h|--help) usage ;;
+
+    "" ) ;; 
+    #Falls kein Argument übergeben wird, wird die Standardoption verwendet
+    *) echo "Fehler: Error'$1'"; usage ;;
 esac
 
-# Verwendung von ss, um alle lauschenden TCP und UDP Sockets anzuzeigen
-ports=$(ss -tuln | awk 'NR>1 {split($5, a, ":"); print a[length(a)]}' | sort -u)
+#Guckt ob der Benutzer rechte hat um Ports auszulesen
+ports=$(ss -tlpn4 | awk 'NR>1 {split($4, a, ":"); print a[length(a)]}' | sort -u)
 
-# Prüfen, ob Ports gefunden wurden
 if [ -z "$ports" ]; then
-    echo "No open ports found."
+    echo "Keine Port gefunden"
     exit 0
 fi
 
-# Header für die Ausgabe
+# Header
 if [ "$option" == "command" ]; then
     printf "%-8s %-8s %-50s\n" "Port" "User-ID" "Command"
     echo "---------------------------------------------------------------"
@@ -57,29 +52,35 @@ fi
 
 # Ports durchgehen
 for port in $ports; do
-    
- # PID des Prozesses ermitteln, der den Port verwendet
-pid=$(ss -tulnp | awk -v p=":$port" '$5 ~ p"$" {gsub("pid=", "", $NF); split($NF, a, ","); print a[1]; exit}')
+    # Guckt ob der Port eine Zahl ist
+    pid=$(lsof -iTCP:$port -sTCP:LISTEN -t | head -n 1)
 
-# Wenn keine PID gefunden wurde, überspringen
-if [ -z "$pid" ]; then
-    if [ "$option" == "command" ]; then
-        printf "%-8s %-8s %-50s\n" "$port" "[N/A]" "not found"
-    else
-        printf "%-8s %-8s\n" "$port" "[N/A]"
+    if [ -z "$pid" ]; then
+        if [ "$option" == "command" ]; then
+        
+            if [ "$port" == "53" ]; then
+                printf "%-8s %-8s %-50s\n" "$port" "[system]" "DNS-Dienst"
+            else
+                printf "%-8s %-8s %-50s\n" "$port" "[N/A]"
+            fi
+        else
+            printf "%-8s %-8s\n" "$port" "[N/A]"
+        fi
+        continue
     fi
-    continue
-fi
 
-
-    # User-ID über ps ermitteln
+   # Holt die User-ID des Prozesses (UID) für die gegebene PID
     uid=$(ps -o uid= -p "$pid" 2>/dev/null)
     [ -z "$uid" ] && uid="[N/A]"
 
-    # Falls Option 'command' gewählt wurde, den Befehl ermitteln
+    # Holt den Command des Prozesses (CMD) für die gegebene PID
+    # und gibt den ersten Teil des Befehls aus
+    # Wenn der Prozess nicht mehr existiert, wird "[Prozess beendet]" ausgegeben
+    # und der Port wird als "[N/A]" angezeigt
+    # Wenn der Port 53 ist, wird "DNS-Dienst" ausgegeben
     if [ "$option" == "command" ]; then
-        cmd=$(ps -o cmd= -p "$pid" 2>/dev/null)
-        [ -z "$cmd" ] && cmd="[process exited]"
+        cmd=$(ps -o cmd= -p "$pid" 2>/dev/null | awk '{print $1}')
+        [ -z "$cmd" ] && cmd="[Prozess beendet]"
         printf "%-8s %-8s %-50s\n" "$port" "$uid" "$cmd"
     else
         printf "%-8s %-8s\n" "$port" "$uid"
