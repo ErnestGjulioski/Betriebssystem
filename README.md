@@ -1,8 +1,6 @@
 # Labor Betriebssysteme WS 2024/25
 Labor des Fach Betriebssystem an der Hochschule Esslingen
 
-## Modul: Labor Betriebssystem
-
 
 ## Labor 1: Shellskripte
 ### Ziel
